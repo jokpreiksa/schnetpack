@@ -5,7 +5,6 @@ import schnetpack.nn as snn
 from schnetpack.data import StatisticsAccumulator
 from schnetpack import Properties
 
-
 __all__ = ["HDNNException", "SymmetryFunctions", "BehlerSFBlock", "StandardizeSF"]
 
 
@@ -53,20 +52,20 @@ class SymmetryFunctions(nn.Module):
     """
 
     def __init__(
-        self,
-        n_radial=22,
-        n_angular=5,
-        zetas={1},
-        cutoff=snn.CosineCutoff,
-        cutoff_radius=5.0,
-        centered=False,
-        crossterms=False,
-        elements=frozenset((1, 6, 7, 8, 9)),
-        sharez=True,
-        trainz=False,
-        initz="weighted",
-        len_embedding=5,
-        pairwise_elements=False,
+            self,
+            n_radial=22,
+            n_angular=5,
+            zetas={1},
+            cutoff=snn.CosineCutoff,
+            cutoff_radius=5.0,
+            centered=False,
+            crossterms=False,
+            elements=frozenset((1, 6, 7, 8, 9)),  # For xtb_weighted there is no need to specify
+            sharez=True,
+            trainz=False,
+            initz="weighted",
+            len_embedding=5,
+            pairwise_elements=False,
     ):
 
         super(SymmetryFunctions, self).__init__()
@@ -139,16 +138,14 @@ class SymmetryFunctions(nn.Module):
 
         # Compute total number of symmetry functions
         if not pairwise_elements:
-            self.n_symfuncs = (
-                self.n_radial + self.n_angular * self.n_theta
-            ) * self.n_elements
+            if initz == 'xTB_weighted':
+                self.n_symfuncs = (self.n_radial + self.n_angular * self.n_theta) * 4
+            else:
+                self.n_symfuncs = ( self.n_radial + self.n_angular * self.n_theta) * self.n_elements
         else:
             # if the outer product is used, all unique pairs of elements are considered, leading to the factor of
             # (N+1)/2
-            self.n_symfuncs = (
-                self.n_radial
-                + self.n_angular * self.n_theta * (self.n_elements + 1) // 2
-            ) * self.n_elements
+            self.n_symfuncs = (self.n_radial + self.n_angular * self.n_theta * (self.n_elements + 1) // 2) * self.n_elements
 
     def initz(self, mode, elements):
         """
@@ -159,6 +156,7 @@ class SymmetryFunctions(nn.Module):
                 weighted: Weigh symmetry functions with nuclear charges (wACSF)
                 onehot: Represent elements by onehot vectors. This can be used in combination with pairwise_elements
                         in order to emulate the behavior of classic Behler symmetry functions.
+                xTB_weighted: xTB weigh symmetry functions with xTB computed atomic properties.
                 embedding: Use random embeddings, which can e.g. be trained. Embedding length is modified via
                            len_embedding (default=False).
             elements (set of int): List of elements present in the molecule.
@@ -167,15 +165,16 @@ class SymmetryFunctions(nn.Module):
             torch.nn.Embedding: Embedding layer of the initialized elemental weights.
 
         """
-
         maxelements = max(elements)
         nelements = len(elements)
 
         if mode == "weighted":
             weights = torch.arange(maxelements + 1)[:, None]
             z_weights = nn.Embedding(maxelements + 1, 1)
+
             z_weights.weight.data = weights
             self.n_elements = 1
+
         elif mode == "onehot":
             weights = torch.zeros(maxelements + 1, nelements)
             for idx, Z in enumerate(elements):
@@ -201,21 +200,38 @@ class SymmetryFunctions(nn.Module):
             inputs (dict of torch.Tensor): SchNetPack format dictionary of input tensors.
 
         Returns:
-            torch.Tensor: Nbatch x Natoms x Nsymmetry_functions Tensor containing ACSFs or wACSFs.
+            torch.Tensor: Nbatch x Natoms x Nsymmetry_functions Tensor containing ACSFs/wACSFs/xTBwACSFs.
 
         """
+
+        #print(inputs['_xtb_props'])
         positions = inputs[Properties.R]
         Z = inputs[Properties.Z]
+        try:
+            xtb_props = inputs[Properties.xtb_props]
+        except:
+            try:
+                xtb_props = inputs['_xtb_props']
+            except:
+                print('Can not read xtb data')
+
+
         neighbors = inputs[Properties.neighbors]
         neighbor_mask = inputs[Properties.neighbor_mask]
 
         cell = inputs[Properties.cell]
         cell_offset = inputs[Properties.cell_offset]
 
-        # Compute radial functions
+        # Compute radial functions, by first trying conventional embedings and if not working incorporating xtb_props
         if self.RDF is not None:
             # Get atom type embeddings
-            Z_rad = self.radial_Z(Z)
+            #try:
+
+            #    Z_rad = self.radial_Z(Z)
+
+            #except:
+            Z_rad = xtb_props
+            print(Z_rad.size(), neighbors.size())
             # Get atom types of neighbors
             Z_ij = snn.neighbor_elements(Z_rad, neighbors)
             # Compute distances
@@ -246,7 +262,12 @@ class SymmetryFunctions(nn.Module):
             neighbor_pairs_mask = inputs[Properties.neighbor_pairs_mask]
 
             # Get element contributions of the pairs
-            Z_angular = self.angular_Z(Z)
+
+            try:
+                Z_angular = self.angular_Z(Z)
+            except:
+                Z_angular = xtb_props
+
             Z_ij = snn.neighbor_elements(Z_angular, idx_j)
             Z_ik = snn.neighbor_elements(Z_angular, idx_k)
 
@@ -307,15 +328,15 @@ class BehlerSFBlock(SymmetryFunctions):
     """
 
     def __init__(
-        self,
-        n_radial=22,
-        n_angular=5,
-        zetas={1},
-        cutoff_radius=5.0,
-        elements=frozenset((1, 6, 7, 8, 9)),
-        centered=False,
-        crossterms=False,
-        mode="weighted",
+            self,
+            n_radial=22,
+            n_angular=5,
+            zetas={1},
+            cutoff_radius=5.0,
+            elements=frozenset((1, 6, 7, 8, 9)),
+            centered=False,
+            crossterms=False,
+            mode="weighted",
     ):
         # Determine mode.
         if mode == "weighted":
