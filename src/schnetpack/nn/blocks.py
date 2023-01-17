@@ -213,3 +213,110 @@ class GatedNetwork(nn.Module):
         representation = inputs["representation"]
         gated_network = self.gate(atomic_numbers) * self.network(representation)
         return torch.sum(gated_network, -1, keepdim=True)
+
+class xtb_Gate(nn.Module):
+    """
+    Produces a Nbatch x Natoms x Nxtbprops mask depending on the atomic properties calculated with xTB.
+    The gate values will be adapted during training.
+    Here, nn.Linear is used in place of nn.Embedding, and the parameters n_gates
+    and n_props are used to define the shape of the linear layer.
+
+    Args:
+        n_gates (int): Number of gates.
+        n_props (int): Number of properties n_props = 4 by default.
+        weight_init (str): weight initialization method, (default `xavier`)
+    """
+
+    def __init__(self, n_gates=5, n_props=4, weight_init='xavier'):
+        super(xtb_Gate, self).__init__()
+        self.n_props = n_props
+        self.n_gates = n_gates
+        self.weight_init=weight_init
+        self.gate = nn.Linear(n_props, n_gates)
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        if self.weight_init == 'xavier':
+            nn.init.xavier_uniform_(self.gate.weight)
+        elif self.weight_init == 'kaiming':
+            nn.init.kaiming_uniform_(self.gate.weight, nonlinearity='relu')
+        else:
+            raise ValueError('Only xavier and kaiming initialization is allowed')
+
+    def forward(self, xtb_props):
+        """
+        Args:
+            xtb_props (torch.Tensor): Tensor containing atomic properties of xtb calculations.
+
+        Returns:
+            torch.Tensor:.
+
+        """
+        return self.gate(xtb_props)
+
+
+class xtb_GatedNetwork(nn.Module):
+    """
+    Combines the TiledMultiLayerNN with the xtb_gate to obtain xtb properties specific atomistic networks.
+
+    Args:
+        nin (int): number of input nodes
+        nout (int): number of output nodes
+        n_hidden (int): number of nodes in hidden nn (default 50)
+        n_layers (int): number of layers (default 3)
+        n_gates (int): number of gates/atom types to be learned.
+        n_props (int): number of xtb properties
+        activation (callable): activation function
+        weight_init (str): weight initialization method, (default `xavier`)
+
+    References
+    ----------
+    .. [#behler1] Behler, Parrinello:
+       Generalized Neural-Network Representation of High-Dimensional Potential-Energy Surfaces.
+       Phys. Rev. Lett. 98, 146401. 2007.
+
+    """
+
+    def __init__(
+        self,
+        nin,
+        nout,
+        n_hidden=50,
+        n_layers=3,
+        n_gates=5,
+        n_props=4,
+        activation=shifted_softplus,
+        weight_init='xavier',
+    ):
+        super(xtb_GatedNetwork, self).__init__()
+        self.n_gates = n_gates
+        self.n_props = n_props
+        self.weight_init = weight_init
+        self.gate = xtb_Gate(n_gates=n_gates, n_props=n_props, weight_init=weight_init)
+        self.network = TiledMultiLayerNN(
+            nin,
+            nout,
+            self.n_props,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            activation=activation,
+        )
+
+    def forward(self, inputs):
+        """
+        Args:
+            inputs (dict of torch.Tensor): SchNetPack format dictionary of input tensors.
+
+        Returns:
+            torch.Tensor: Output of the gated network.
+        """
+        try:
+            xtb_props = inputs[Properties.xtb_props]
+        except:
+            try:
+                xtb_props = inputs['_xtb_props']
+            except:
+                print('Can not read atomic data. Please make sure it is imported')
+        representation = inputs["representation"]
+        gated_network = self.gate(xtb_props) * self.network(representation)
+        return torch.sum(gated_network, -1, keepdim=True)

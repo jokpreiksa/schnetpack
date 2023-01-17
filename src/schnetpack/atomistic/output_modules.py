@@ -623,3 +623,89 @@ class ElectronicSpatialExtent(Atomwise):
             result[self.contributions] = charges
 
         return result
+
+
+class ElementalXtb(Atomwise):
+    """
+    Preidicts properties in xtb_properties dependant fashion. The separate networks are created
+    and trained according to xtb_props data. It is only used for xtb networks.
+
+    Args:
+        n_in (int): input dimension of representation (default: 160)
+        n_out (int): output dimension of target property (default: 100)
+        n_gates (int): number of gates/atom types to be learned. (default:25)
+        n_props (int): number of xtb properties (default: 4)
+        aggregation_mode (str): one of {sum, avg} (default: sum)
+        n_layers (int): number of nn in output network (default: 3)
+        property (str): name of the output property (default: "y")
+        derivative (str or None): Name of property derivative. No derivative
+            returned if None. (default: None)
+        negative_dr (bool): Multiply the derivative with -1 if True. (default: False)
+        contributions (str or None): Name of property contributions in return dict.
+            No contributions returned if None. (default: None)
+        create_graph (bool): If False, the graph used to compute the grad will be
+            freed. Note that in nearly all cases setting this option to True is not nee
+            ded and often can be worked around in a much more efficient way. Defaults to
+            the value of create_graph. (default: False)
+        n_hidden (int): number of neurons in each layer of the output network.
+            (default: 50)
+        activation (function): activation function for hidden nn
+            (default: spk.nn.activations.shifted_softplus)
+        mean (torch.Tensor or None): mean of property
+        stddev (torch.Tensor or None): standard deviation of property (default: None)
+        atomref (torch.Tensor or None): reference single-atom properties. Expects
+            an (max_z + 1) x 1 array where atomref[Z] corresponds to the reference
+            property of element Z. The value of atomref[0] must be zero, as this
+            corresponds to the reference property for for "mask" atoms. (default: None)
+        weight_init (str): weight initialization method, (default `xavier`)
+    """
+
+    def __init__(
+        self,
+        n_in=128,
+        n_out=100,
+        n_gates=25,
+        n_props=4,
+        aggregation_mode="sum",
+        n_layers=3,
+        property="y",
+        derivative=None,
+        negative_dr=False,
+        contributions=None,
+        create_graph=True,
+        n_hidden=50,
+        activation=schnetpack.nn.activations.shifted_softplus,
+        mean=None,
+        stddev=None,
+        atomref=None,
+        weight_init='xavier',
+    ):
+        outnet = schnetpack.nn.blocks.xtb_GatedNetwork(
+            n_in,
+            n_out,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            activation=activation,
+            n_gates=n_gates,
+            n_props=n_props,
+            weight_init=weight_init,
+        )
+
+        super(ElementalXtb, self).__init__(
+            n_in=n_in,
+            n_out=n_out,
+            aggregation_mode=aggregation_mode,
+            n_layers=n_layers,
+            n_neurons=None,
+            activation=activation,
+            property=property,
+            contributions=contributions,
+            derivative=derivative,
+            negative_dr=negative_dr,
+            create_graph=create_graph,
+            mean=mean,
+            stddev=stddev,
+            atomref=atomref,
+            outnet=outnet,
+        )
+
