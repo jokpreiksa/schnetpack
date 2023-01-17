@@ -4,7 +4,7 @@ from torch import nn
 from schnetpack import Properties
 from schnetpack.nn import shifted_softplus, Dense
 
-__all__ = ["MLP", "TiledMultiLayerNN", "ElementalGate", "GatedNetwork"]
+__all__ = ["MLP", "TiledMultiLayerNN", "ElementalGate", "GatedNetwork", "xtb_GatedNetwork"]
 
 
 class MLP(nn.Module):
